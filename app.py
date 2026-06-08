@@ -422,42 +422,69 @@ def main():
                 st.rerun()
 
     st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📱 Captura de Log (ADB)")
+
+    if st.sidebar.button("🔄 Detectar Dispositivo", use_container_width=True):
+        st.rerun()
+
+    _dispositivos = listar_dispositivos()
+    if not _dispositivos:
+        st.sidebar.warning("Nenhum dispositivo USB encontrado.")
+        st.sidebar.caption("Verifique o cabo e reinicie o Streamlit com ADB no PATH.")
+        adb_ativo = False
+    else:
+        _dev = st.sidebar.selectbox("Dispositivo:", _dispositivos, key="adb_device_sel")
+        st.session_state.adb_device = _dev
+        if st.sidebar.button("🔍 Buscar apps Stone/Ton", use_container_width=True):
+            with st.spinner("Buscando..."):
+                st.session_state.adb_packages = listar_packages_stone(_dev)
+        if st.session_state.adb_packages:
+            st.sidebar.success(f"✅ {len(st.session_state.adb_packages)} packages prontos")
+            adb_ativo = True
+        else:
+            st.sidebar.caption("Clique em 'Buscar apps Stone/Ton'.")
+            adb_ativo = False
+
+    if st.session_state.tc_capturando:
+        _arq = Path(st.session_state.get("log_arquivo_atual", ""))
+        _kb = _arq.stat().st_size / 1024 if _arq.exists() else 0
+        st.sidebar.info(f"🔴 Capturando **{st.session_state.tc_capturando}** — {_kb:.1f} KB")
+        if st.sidebar.button("⏹️ Parar Captura", use_container_width=True):
+            parar_captura(); st.rerun()
+
+    st.sidebar.markdown("### 📁 Logs Salvos")
+    _logs = sorted(LOG_DIR.glob("*.txt"), reverse=True)
+    if not _logs:
+        st.sidebar.caption("Nenhum log capturado ainda.")
+    else:
+        for _arq in _logs:
+            _kb = _arq.stat().st_size / 1024
+            st.sidebar.markdown(f"📄 `{_arq.name[:28]}` — {_kb:.1f} KB")
+            _c1, _c2 = st.sidebar.columns(2)
+            with _c1:
+                with open(_arq, "rb") as _f:
+                    st.sidebar.download_button("⬇️ Baixar", data=_f.read(),
+                        file_name=_arq.name, mime="text/plain", key=f"dl_{_arq.name}")
+            with _c2:
+                if st.sidebar.button("🗑️ Excluir", key=f"del_{_arq.name}"):
+                    _arq.unlink(); st.rerun()
+
+    st.sidebar.markdown("---")
     st.sidebar.markdown("## 📈 Resumo Executivo")
 
-    st.sidebar.markdown(f"""
-        <div style="padding: 10px; border-radius: 6px; background-color: #f0f4f8; border-left: 5px solid #1a365d; margin-bottom: 10px;">
-            <span style="font-size: 13px; color: #1a365d; font-weight: bold;">Total de Casos</span><br>
-            <span style="font-size: 20px; font-weight: bold; color: #0f172a;">{total_itens}</span>
-        </div>
-    """, unsafe_allow_html=True)
-
-    st.sidebar.markdown(f"""
-        <div style="padding: 10px; border-radius: 6px; background-color: #e6fffa; border-left: 5px solid #319795; margin-bottom: 10px;">
-            <span style="font-size: 13px; color: #234e52; font-weight: bold;">Aprovado ✅</span><br>
-            <span style="font-size: 20px; font-weight: bold; color: #042f2e;">{qtd_aprovado}</span>
-        </div>
-    """, unsafe_allow_html=True)
-
-    st.sidebar.markdown(f"""
-        <div style="padding: 10px; border-radius: 6px; background-color: #fff5f5; border-left: 5px solid #e53e3e; margin-bottom: 10px;">
-            <span style="font-size: 13px; color: #742a2a; font-weight: bold;">Reprovado ❌</span><br>
-            <span style="font-size: 20px; font-weight: bold; color: #451a1a;">{qtd_reprovado}</span>
-        </div>
-    """, unsafe_allow_html=True)
-
-    st.sidebar.markdown(f"""
-        <div style="padding: 10px; border-radius: 6px; background-color: #fffaf0; border-left: 5px solid #dd6b20; margin-bottom: 10px;">
-            <span style="font-size: 13px; color: #7b341e; font-weight: bold;">Não Aplicável ⚠️</span><br>
-            <span style="font-size: 20px; font-weight: bold; color: #431407;">{qtd_nao_aplic}</span>
-        </div>
-    """, unsafe_allow_html=True)
-
-    st.sidebar.markdown(f"""
-        <div style="padding: 10px; border-radius: 6px; background-color: #edf2f7; border-left: 5px solid #4a5568; margin-bottom: 20px;">
-            <span style="font-size: 13px; color: #2d3748; font-weight: bold;">Não Executados</span><br>
-            <span style="font-size: 20px; font-weight: bold; color: #1e293b;">{qtd_nao_exec}</span>
-        </div>
-    """, unsafe_allow_html=True)
+    for _bg, _bd, _tit, _val, _ct in [
+        ("#f0f4f8","#1a365d","Total de Casos", total_itens, "#0f172a"),
+        ("#e6fffa","#319795","Aprovado ✅", qtd_aprovado, "#042f2e"),
+        ("#fff5f5","#e53e3e","Reprovado ❌", qtd_reprovado, "#451a1a"),
+        ("#fffaf0","#dd6b20","Não Aplicável ⚠️", qtd_nao_aplic, "#431407"),
+        ("#edf2f7","#4a5568","Não Executados", qtd_nao_exec, "#1e293b"),
+    ]:
+        st.sidebar.markdown(f"""
+            <div style="padding:10px;border-radius:6px;background-color:{_bg};border-left:5px solid {_bd};margin-bottom:10px;">
+                <span style="font-size:13px;color:{_bd};font-weight:bold;">{_tit}</span><br>
+                <span style="font-size:20px;font-weight:bold;color:{_ct};">{_val}</span>
+            </div>
+        """, unsafe_allow_html=True)
 
     st.sidebar.markdown("### 📄 Exportar")
     try:
@@ -510,14 +537,37 @@ def main():
 
             st.write(f"**Passos para Execução:**\n{row['Descrição / Passos']}")
 
-            st.selectbox(
-                f"Alterar status de {id_teste}:",
-                OPCOES_STATUS,
-                index=OPCOES_STATUS.index(status_atual) if status_atual in OPCOES_STATUS else 0,
-                key=f"status_{id_teste}",
-                on_change=atualizar_status,
-                args=(id_teste,)
-            )
+            _col_sel, _col_adb = st.columns([4, 1])
+            with _col_sel:
+                st.selectbox(
+                    f"Alterar status de {id_teste}:",
+                    OPCOES_STATUS,
+                    index=OPCOES_STATUS.index(status_atual) if status_atual in OPCOES_STATUS else 0,
+                    key=f"status_{id_teste}",
+                    on_change=atualizar_status,
+                    args=(id_teste,)
+                )
+            with _col_adb:
+                if adb_ativo:
+                    _tc_cap = st.session_state.tc_capturando
+                    if _tc_cap == id_teste:
+                        _arq = Path(st.session_state.get("log_arquivo_atual", ""))
+                        _kb = _arq.stat().st_size / 1024 if _arq.exists() else 0
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button(f"⏹️ {_kb:.0f}KB", key=f"adb_{id_teste}", use_container_width=True):
+                            parar_captura(); st.rerun()
+                    elif _tc_cap is None:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button("▶️ Log", key=f"adb_{id_teste}", use_container_width=True):
+                            _ok = iniciar_captura_tc(id_teste,
+                                                     st.session_state.adb_device,
+                                                     st.session_state.adb_packages)
+                            if not _ok:
+                                st.warning("Nenhum processo stone ativo. Abra o app no POS.")
+                            st.rerun()
+                    else:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        st.button("▶️ Log", key=f"adb_{id_teste}", disabled=True, use_container_width=True)
 
             if status_atual in STATUS_COM_OBSERVACAO:
                 label_obs = "📝 Descrição do defeito / motivo:" if status_atual == "Reprovado ❌" else "📝 Motivo de não aplicabilidade:"
