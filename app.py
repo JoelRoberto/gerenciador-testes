@@ -70,9 +70,25 @@ def limpar_sessao(lista_ids):
 
 # ══ ADB ═══════════════════════════════════════════════════════════════════════
 
+_ADB_CANDIDATES = [
+    "adb",
+    r"C:\Variaveis_de_ambiente\scrcpy-win64-v2.7\adb.exe",
+    r"C:\Users\Inovare\AppData\Local\Android\Sdk\platform-tools\adb.exe",
+]
+
+def _adb_bin():
+    import shutil
+    for p in _ADB_CANDIDATES:
+        found = shutil.which(p)
+        if found:
+            return found
+        if p != "adb" and Path(p).exists():
+            return p
+    return "adb"
+
 def rodar_adb(args, timeout=10):
     try:
-        r = subprocess.run(["adb"]+args, capture_output=True, text=True,
+        r = subprocess.run([_adb_bin()]+args, capture_output=True, text=True,
                            timeout=timeout, encoding="utf-8", errors="replace")
         return r.stdout.strip(), r.stderr.strip()
     except FileNotFoundError:
