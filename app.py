@@ -34,10 +34,20 @@ STATUS_COM_OBSERVACAO = {"Reprovado ❌", "Não Aplicável ⚠️"}
 
 CONFIG_PADRAO = {"org": "", "terminal": "", "sn": "", "so": "", "bundle": "", "qa": ""}
 
-ARQUIVO_SAVE = Path("sessao_salva.json")
+SAVES_DIR = Path("saves")
+SAVES_DIR.mkdir(exist_ok=True)
 
 
 # --- PERSISTÊNCIA ---
+
+def _arquivo_save():
+    qa = st.session_state.get("config", {}).get("qa", "").strip()
+    nome = qa if qa else "anonimo"
+    # Sanitiza para nome de arquivo seguro
+    nome = "".join(c for c in nome if c.isalnum() or c in "-_").lower()
+    nome = nome if nome else "anonimo"
+    return SAVES_DIR / f"sessao_{nome}.json"
+
 
 def salvar_sessao():
     dados = {
@@ -45,13 +55,18 @@ def salvar_sessao():
         "resultados": st.session_state.resultados,
         "observacoes": st.session_state.observacoes,
     }
-    ARQUIVO_SAVE.write_text(json.dumps(dados, ensure_ascii=False, indent=2), encoding="utf-8")
+    _arquivo_save().write_text(json.dumps(dados, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def carregar_sessao():
-    if ARQUIVO_SAVE.exists():
+def carregar_sessao(qa_nome=""):
+    """Tenta carregar save pelo nome do QA. Se não informado, retorna None."""
+    if not qa_nome:
+        return None, None, None
+    nome = "".join(c for c in qa_nome.strip() if c.isalnum() or c in "-_").lower()
+    arq = SAVES_DIR / f"sessao_{nome}.json"
+    if arq.exists():
         try:
-            dados = json.loads(ARQUIVO_SAVE.read_text(encoding="utf-8"))
+            dados = json.loads(arq.read_text(encoding="utf-8"))
             return dados.get("config"), dados.get("resultados"), dados.get("observacoes")
         except Exception:
             pass
@@ -59,8 +74,9 @@ def carregar_sessao():
 
 
 def limpar_sessao(lista_ids):
-    if ARQUIVO_SAVE.exists():
-        ARQUIVO_SAVE.unlink()
+    arq = _arquivo_save()
+    if arq.exists():
+        arq.unlink()
     st.session_state.config = CONFIG_PADRAO.copy()
     st.session_state.resultados = {id_t: "Não Executado" for id_t in lista_ids}
     st.session_state.observacoes = {id_t: "" for id_t in lista_ids}
@@ -290,7 +306,13 @@ def salvar_config():
         "qa": st.session_state.cfg_qa,
     }
     st.session_state.config_aberta = False
-    salvar_sessao()  # auto-save
+    # Tenta carregar save existente deste usuário
+    qa = st.session_state.config.get("qa", "").strip()
+    config_salva, resultados_salvos, observacoes_salvas = carregar_sessao(qa)
+    if resultados_salvos:
+        st.session_state.resultados = resultados_salvos
+        st.session_state.observacoes = observacoes_salvas
+    salvar_sessao()  # cria/atualiza arquivo do usuário
 
 
 # --- FORM CONFIG ---
@@ -327,14 +349,12 @@ def main():
     total_itens = min(len(CASOS_DE_TESTE), len(PASSOS_EXECUCAO))
     lista_ids = [f"TC-{str(i).zfill(3)}" for i in range(1, total_itens + 1)]
 
-    # Inicializa session_state — carrega save se existir
+    # Inicializa session_state — sempre abre config na primeira vez
     if "resultados" not in st.session_state:
-        config_salva, resultados_salvos, observacoes_salvas = carregar_sessao()
-        st.session_state.config = config_salva or CONFIG_PADRAO.copy()
-        st.session_state.resultados = resultados_salvos or {id_t: "Não Executado" for id_t in lista_ids}
-        st.session_state.observacoes = observacoes_salvas or {id_t: "" for id_t in lista_ids}
-        # Abre config só se não tiver save
-        st.session_state.config_aberta = config_salva is None
+        st.session_state.config = CONFIG_PADRAO.copy()
+        st.session_state.resultados = {id_t: "Não Executado" for id_t in lista_ids}
+        st.session_state.observacoes = {id_t: "" for id_t in lista_ids}
+        st.session_state.config_aberta = True
 
     if "config_aberta" not in st.session_state:
         st.session_state.config_aberta = False
