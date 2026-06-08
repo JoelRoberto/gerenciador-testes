@@ -30,15 +30,6 @@ MAPEAMENTO_SECOES = {
 OPCOES_STATUS = ["Não Executado", "Aprovado ✅", "Reprovado ❌", "Não Aplicável ⚠️"]
 STATUS_COM_OBSERVACAO = {"Reprovado ❌", "Não Aplicável ⚠️"}
 
-CONFIG_PADRAO = {
-    "org": "",
-    "terminal": "",
-    "sn": "",
-    "so": "",
-    "bundle": "",
-    "qa": "",
-}
-
 
 class RelatorioPDF(FPDF):
     def header(self):
@@ -79,7 +70,7 @@ def tratar_texto_pdf(texto):
     return texto.encode('latin-1', 'ignore').decode('latin-1')
 
 
-def gerar_pdf_fpdf(df_base, resultados, observacoes, config):
+def gerar_pdf_fpdf(df_base, resultados, observacoes):
     df = df_base.copy()
     df["Resultado"] = df["ID"].map(lambda x: resultados.get(x, "Não Executado"))
     df["Observacao"] = df["ID"].map(lambda x: observacoes.get(x, ""))
@@ -94,51 +85,7 @@ def gerar_pdf_fpdf(df_base, resultados, observacoes, config):
     pdf.alias_nb_pages()
     pdf.add_page()
 
-    # --- FICHA DE IDENTIFICAÇÃO ---
-    pdf.set_font("Helvetica", "B", 11)
-    pdf.set_text_color(45, 55, 72)
-    pdf.cell(0, 8, "Identificacao da Rodada:", ln=True)
-    pdf.ln(2)
-
-    campos_config = [
-        ("ORG", config.get("org", "")),
-        ("Terminal", config.get("terminal", "")),
-        ("SN", config.get("sn", "")),
-        ("SO", config.get("so", "")),
-        ("Bundle", config.get("bundle", "")),
-        ("QA Responsavel", config.get("qa", "")),
-    ]
-
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_fill_color(240, 244, 248)
-
-    # 2 colunas de 3 campos cada
-    w_label, w_valor, gap = 32, 62, 4
-    pares = [(campos_config[i], campos_config[i+3]) for i in range(3)]
-
-    for (label_a, valor_a), (label_b, valor_b) in pares:
-        x, y = pdf.get_x(), pdf.get_y()
-        pdf.set_fill_color(43, 108, 176)
-        pdf.set_text_color(255, 255, 255)
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.cell(w_label, 8, f" {label_a}", border=1, fill=True)
-        pdf.set_fill_color(248, 250, 252)
-        pdf.set_text_color(45, 55, 72)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.cell(w_valor, 8, f" {tratar_texto_pdf(valor_a)}", border=1, fill=True)
-        pdf.cell(gap, 8, "", border=0)
-        pdf.set_fill_color(43, 108, 176)
-        pdf.set_text_color(255, 255, 255)
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.cell(w_label, 8, f" {label_b}", border=1, fill=True)
-        pdf.set_fill_color(248, 250, 252)
-        pdf.set_text_color(45, 55, 72)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.cell(w_valor, 8, f" {tratar_texto_pdf(valor_b)}", border=1, fill=True, ln=True)
-
-    pdf.ln(6)
-
-    # --- RESUMO EXECUTIVO ---
+    # Resumo executivo
     pdf.set_font("Helvetica", "B", 11)
     pdf.set_text_color(45, 55, 72)
     pdf.cell(0, 8, "Resumo Executivo da Rodada:", ln=True)
@@ -146,7 +93,6 @@ def gerar_pdf_fpdf(df_base, resultados, observacoes, config):
 
     pdf.set_font("Helvetica", "", 9)
     pdf.set_fill_color(240, 244, 248)
-    pdf.set_text_color(45, 55, 72)
     pdf.cell(35, 10, f" Total: {qtd_total}", border=1, fill=True)
     pdf.set_fill_color(230, 255, 250)
     pdf.cell(38, 10, f" Aprovado: {qtd_aprovado}", border=1, fill=True)
@@ -158,7 +104,7 @@ def gerar_pdf_fpdf(df_base, resultados, observacoes, config):
     pdf.cell(41, 10, f" Nao Exec.: {qtd_nao_exec}", border=1, fill=True, ln=True)
     pdf.ln(8)
 
-    # --- CABEÇALHO DA TABELA ---
+    # Cabeçalho da tabela
     w_id, w_caso, w_passos, w_status = 18, 54, 93, 25
     largura_total = w_id + w_caso + w_passos + w_status
 
@@ -189,9 +135,12 @@ def gerar_pdf_fpdf(df_base, resultados, observacoes, config):
         max_linhas = max(linhas_caso, linhas_passos, 1)
         altura_linha_principal = (max_linhas * h_linha_texto) + 6
 
+        # Altura da linha de observação (apenas se houver)
         obs_label = "Observacao: "
-        linhas_obs = len(pdf.multi_cell(largura_total - 6, h_linha_texto, obs_label + obs_limpo, split_only=True)) if obs_limpo else 0
+        obs_texto_completo = obs_label + obs_limpo if obs_limpo else ""
+        linhas_obs = len(pdf.multi_cell(largura_total - 6, h_linha_texto, obs_texto_completo, split_only=True)) if obs_limpo else 0
         altura_obs = (linhas_obs * h_linha_texto) + 4 if obs_limpo else 0
+
         altura_total_bloco = altura_linha_principal + altura_obs
 
         if pdf.get_y() + altura_total_bloco > 275:
@@ -199,17 +148,19 @@ def gerar_pdf_fpdf(df_base, resultados, observacoes, config):
 
         x, y = pdf.get_x(), pdf.get_y()
 
+        # Bordas da linha principal
         pdf.rect(x, y, w_id, altura_linha_principal)
         pdf.rect(x + w_id, y, w_caso, altura_linha_principal)
         pdf.rect(x + w_id + w_caso, y, w_passos, altura_linha_principal)
 
+        # Célula de status colorida
         if "Aprovado" in status_original:
             pdf.set_fill_color(230, 255, 250)
             pdf.set_text_color(35, 78, 82)
         elif "Reprovado" in status_original:
             pdf.set_fill_color(255, 245, 245)
             pdf.set_text_color(116, 42, 42)
-        elif "Não Aplicável" in status_original:
+        elif "Nao Aplicavel" in status_limpo or "Não Aplicável" in status_original:
             pdf.set_fill_color(255, 250, 240)
             pdf.set_text_color(123, 52, 30)
         else:
@@ -219,29 +170,34 @@ def gerar_pdf_fpdf(df_base, resultados, observacoes, config):
         pdf.rect(x + w_id + w_caso + w_passos, y, w_status, altura_linha_principal, style="F")
         pdf.rect(x + w_id + w_caso + w_passos, y, w_status, altura_linha_principal)
 
+        # ID
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(43, 108, 176)
         pdf.set_xy(x, y + (altura_linha_principal / 2) - 2)
         pdf.cell(w_id, 4, str(row["ID"]), align="C")
 
+        # Caso de Teste
         pdf.set_font("Helvetica", "", 8.5)
         pdf.set_text_color(45, 55, 72)
         pdf.set_xy(x + w_id + 2, y + 3)
         pdf.multi_cell(w_caso - 4, h_linha_texto, caso_limpo)
 
+        # Passos
         pdf.set_xy(x + w_id + w_caso + 2, y + 3)
         pdf.multi_cell(w_passos - 4, h_linha_texto, passos_limpo)
 
+        # Status label
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_xy(x + w_id + w_caso + w_passos, y + (altura_linha_principal / 2) - 2)
         pdf.cell(w_status, 4, status_limpo, align="C")
 
+        # Linha de observação (opção B: linha adicional abaixo, só se houver)
         y_obs = y + altura_linha_principal
         if obs_limpo:
             if "Reprovado" in status_original:
                 pdf.set_fill_color(255, 235, 235)
                 pdf.set_text_color(116, 42, 42)
-            else:
+            else:  # Não Aplicável
                 pdf.set_fill_color(255, 244, 225)
                 pdf.set_text_color(123, 52, 30)
 
@@ -263,6 +219,7 @@ def gerar_pdf_fpdf(df_base, resultados, observacoes, config):
 
 def atualizar_status(id_teste):
     st.session_state.resultados[id_teste] = st.session_state[f"status_{id_teste}"]
+    # Limpa observação se status voltou para sem-observação
     if st.session_state.resultados[id_teste] not in STATUS_COM_OBSERVACAO:
         st.session_state.observacoes[id_teste] = ""
 
@@ -271,52 +228,8 @@ def atualizar_observacao(id_teste):
     st.session_state.observacoes[id_teste] = st.session_state[f"obs_{id_teste}"]
 
 
-def salvar_config():
-    st.session_state.config = {
-        "org": st.session_state.cfg_org,
-        "terminal": st.session_state.cfg_terminal,
-        "sn": st.session_state.cfg_sn,
-        "so": st.session_state.cfg_so,
-        "bundle": st.session_state.cfg_bundle,
-        "qa": st.session_state.cfg_qa,
-    }
-    st.session_state.config_aberta = False
-
-
-def renderizar_form_config():
-    st.markdown("## ⚙️ Configuração da Rodada de Testes")
-    st.markdown("Preencha as informações abaixo. Todos os campos são opcionais.")
-    st.markdown("---")
-
-    cfg = st.session_state.config
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.selectbox("🏢 ORG", ["", "STONE", "TON"],
-                     index=["", "STONE", "TON"].index(cfg.get("org", "")) if cfg.get("org", "") in ["", "STONE", "TON"] else 0,
-                     key="cfg_org")
-        st.text_input("🔢 SN (Serial Number)", value=cfg.get("sn", ""), key="cfg_sn")
-        st.text_input("📦 BUNDLE", value=cfg.get("bundle", ""), key="cfg_bundle")
-    with col2:
-        st.selectbox("🖥️ TERMINAL", ["", "P2-B", "P2A11"],
-                     index=["", "P2-B", "P2A11"].index(cfg.get("terminal", "")) if cfg.get("terminal", "") in ["", "P2-B", "P2A11"] else 0,
-                     key="cfg_terminal")
-        st.text_input("💻 SO (Sistema Operacional)", value=cfg.get("so", ""), key="cfg_so")
-        st.text_input("👤 QA Responsável", value=cfg.get("qa", ""), key="cfg_qa")
-
-    st.markdown("---")
-    col_btn1, col_btn2 = st.columns([1, 5])
-    with col_btn1:
-        st.button("✅ Salvar e Continuar", on_click=salvar_config, type="primary")
-
-
 def main():
-    # Inicializa session_state
-    if "config" not in st.session_state:
-        st.session_state.config = CONFIG_PADRAO.copy()
-        st.session_state.config_aberta = True
-    if "config_aberta" not in st.session_state:
-        st.session_state.config_aberta = False
+    st.title("📋 Gerenciador de Casos de Teste")
 
     total_itens = min(len(CASOS_DE_TESTE), len(PASSOS_EXECUCAO))
     lista_ids = [f"TC-{str(i).zfill(3)}" for i in range(1, total_itens + 1)]
@@ -333,39 +246,13 @@ def main():
     if "observacoes" not in st.session_state:
         st.session_state.observacoes = {id_t: "" for id_t in lista_ids}
 
-    # Tela de configuração inicial
-    if st.session_state.config_aberta:
-        renderizar_form_config()
-        return
-
-    # --- SIDEBAR ---
     valores_atuais = list(st.session_state.resultados.values())
     qtd_aprovado = valores_atuais.count("Aprovado ✅")
     qtd_reprovado = valores_atuais.count("Reprovado ❌")
     qtd_nao_aplic = valores_atuais.count("Não Aplicável ⚠️")
     qtd_nao_exec = valores_atuais.count("Não Executado")
 
-    cfg = st.session_state.config
-
-    # Ficha de config na sidebar
-    st.sidebar.markdown("## 🗂️ Dados da Rodada")
-    campos_exibir = [
-        ("ORG", cfg.get("org", "")),
-        ("Terminal", cfg.get("terminal", "")),
-        ("SN", cfg.get("sn", "")),
-        ("SO", cfg.get("so", "")),
-        ("Bundle", cfg.get("bundle", "")),
-        ("QA", cfg.get("qa", "")),
-    ]
-    for label, valor in campos_exibir:
-        valor_exibir = valor if valor else "—"
-        st.sidebar.markdown(f"**{label}:** {valor_exibir}")
-
-    if st.sidebar.button("✏️ Editar Configuração"):
-        st.session_state.config_aberta = True
-        st.rerun()
-
-    st.sidebar.markdown("---")
+    # --- SIDEBAR: RESUMO EXECUTIVO ---
     st.sidebar.markdown("## 📈 Resumo Executivo")
 
     st.sidebar.markdown(f"""
@@ -403,9 +290,10 @@ def main():
         </div>
     """, unsafe_allow_html=True)
 
+    # --- SIDEBAR: EXPORTAR ---
     st.sidebar.markdown("### 💾 Exportar Resultados")
     try:
-        pdf_bytes = gerar_pdf_fpdf(df, st.session_state.resultados, st.session_state.observacoes, cfg)
+        pdf_bytes = gerar_pdf_fpdf(df, st.session_state.resultados, st.session_state.observacoes)
         st.sidebar.download_button(
             label="Baixar Relatório Execução (PDF)",
             data=pdf_bytes,
@@ -416,7 +304,6 @@ def main():
         st.sidebar.error(f"Erro ao gerar o PDF: {e}")
 
     # --- CONTEÚDO PRINCIPAL ---
-    st.title("📋 Gerenciador de Casos de Teste")
     st.write(f"Exibindo os **{total_itens}** casos de teste cadastrados.")
     st.markdown("---")
 
@@ -464,6 +351,7 @@ def main():
                 args=(id_teste,)
             )
 
+            # Campo de observação — só aparece para Reprovado e Não Aplicável
             if status_atual in STATUS_COM_OBSERVACAO:
                 label_obs = "📝 Descrição do defeito / motivo:" if status_atual == "Reprovado ❌" else "📝 Motivo de não aplicabilidade:"
                 st.text_area(
