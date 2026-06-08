@@ -1,7 +1,4 @@
 import json
-import subprocess
-import threading
-import datetime
 import pandas as pd
 import streamlit as st
 from fpdf import FPDF
@@ -38,9 +35,7 @@ STATUS_COM_OBSERVACAO = {"Reprovado ❌", "Não Aplicável ⚠️"}
 CONFIG_PADRAO = {"org": "", "terminal": "", "sn": "", "so": "", "bundle": "", "qa": ""}
 
 SAVES_DIR = Path("saves")
-LOG_DIR = Path("logs")
 SAVES_DIR.mkdir(exist_ok=True)
-LOG_DIR.mkdir(exist_ok=True)
 
 
 # --- PERSISTÊNCIA ---
@@ -87,106 +82,7 @@ def limpar_sessao(lista_ids):
     st.session_state.observacoes = {id_t: "" for id_t in lista_ids}
     st.session_state.config_aberta = True
     st.session_state.confirmar_reset = False
-    st.session_state.tc_capturando = None
-    st.session_state._adb_proc = None
-    st.session_state.adb_packages = []
 
-
-
-
-# ── ADB ───────────────────────────────────────────────────────────────────────
-
-def rodar_adb(args, timeout=10):
-    try:
-        r = subprocess.run(["adb"] + args, capture_output=True, text=True,
-                           timeout=timeout, encoding="utf-8", errors="replace")
-        return r.stdout.strip(), r.stderr.strip()
-    except FileNotFoundError:
-        return "", "ADB não encontrado"
-    except subprocess.TimeoutExpired:
-        return "", "Timeout"
-
-
-def listar_dispositivos():
-    stdout, _ = rodar_adb(["devices"])
-    return [l.split("\t")[0].strip() for l in stdout.splitlines()[1:] if "\tdevice" in l]
-
-
-def listar_packages_stone(device_id):
-    stdout, _ = rodar_adb(["-s", device_id, "shell", "pm", "list", "packages"])
-    return sorted(l.replace("package:", "").strip() for l in stdout.splitlines()
-                  if "stone" in l.lower() or "ton" in l.lower())
-
-
-def get_pids_stone(device_id, packages):
-    stdout, _ = rodar_adb(["-s", device_id, "shell", "ps", "-A"])
-    pids = {}
-    for linha in stdout.splitlines():
-        for pkg in packages:
-            if pkg in linha and pkg not in pids:
-                partes = linha.split()
-                if len(partes) >= 2:
-                    try:
-                        pids[pkg] = partes[1]
-                    except Exception:
-                        pass
-    return pids
-
-
-def _capturar_thread(device_id, packages, tc, nome_arquivo, pids):
-    sentinela = LOG_DIR / ".parar"
-    if sentinela.exists():
-        sentinela.unlink()
-    pid_set = set(pids.values())
-    cmd = ["adb", "-s", device_id, "logcat", "-v", "threadtime"]
-    try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                text=True, encoding="utf-8", errors="replace")
-        st.session_state._adb_proc = proc
-        with open(nome_arquivo, "w", encoding="utf-8") as f:
-            f.write("=== LOG CAPTURADO ===\n")
-            f.write(f"TC: {tc}\n")
-            f.write(f"Device: {device_id}\n")
-            for pkg, pid in pids.items():
-                f.write(f"  {pkg} (PID {pid})\n")
-            f.write(f"Inicio: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n")
-            f.write("=" * 50 + "\n\n")
-            for linha in proc.stdout:
-                if sentinela.exists():
-                    break
-                partes = linha.split()
-                if (len(partes) >= 3 and partes[2] in pid_set) or any(pkg in linha for pkg in packages):
-                    f.write(linha)
-                    f.flush()
-    except Exception as e:
-        with open(nome_arquivo, "a", encoding="utf-8") as f:
-            f.write(f"\n[ERRO: {e}]\n")
-
-
-def iniciar_captura_tc(tc, device_id, packages):
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    nome_arquivo = LOG_DIR / f"{tc}_stone_{timestamp}.txt"
-    pids = get_pids_stone(device_id, packages)
-    if not pids:
-        return False
-    st.session_state.tc_capturando = tc
-    st.session_state.log_arquivo_atual = str(nome_arquivo)
-    threading.Thread(target=_capturar_thread,
-                     args=(device_id, packages, tc, nome_arquivo, pids),
-                     daemon=True).start()
-    return True
-
-
-def parar_captura():
-    (LOG_DIR / ".parar").touch()
-    st.session_state.tc_capturando = None
-    proc = st.session_state.get("_adb_proc")
-    if proc:
-        try:
-            proc.terminate()
-        except Exception:
-            pass
-    st.session_state._adb_proc = None
 
 # --- PDF ---
 
@@ -462,6 +358,11 @@ def main():
 
     if "config_aberta" not in st.session_state:
         st.session_state.config_aberta = False
+    for _k, _v in [("tc_capturando", None), ("_adb_proc", None),
+                   ("adb_packages", []), ("adb_device", None),
+                   ("log_arquivo_atual", ""), ("confirmar_reset", False)]:
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
     if "confirmar_reset" not in st.session_state:
         st.session_state.confirmar_reset = False
 
@@ -521,71 +422,42 @@ def main():
                 st.rerun()
 
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### 📱 Captura de Log (ADB)")
-
-    if st.sidebar.button("🔄 Detectar Dispositivo", use_container_width=True):
-        st.rerun()
-
-    dispositivos = listar_dispositivos()
-    if not dispositivos:
-        st.sidebar.warning("Nenhum dispositivo USB encontrado.")
-        st.sidebar.caption("Verifique o cabo, depuração USB ativa, e reinicie o Streamlit.")
-        adb_ativo = False
-    else:
-        device_sel = st.sidebar.selectbox("Dispositivo:", dispositivos, key="adb_device_sel")
-        st.session_state.adb_device = device_sel
-
-        if st.sidebar.button("🔍 Buscar apps Stone/Ton", use_container_width=True):
-            with st.spinner("Buscando packages..."):
-                st.session_state.adb_packages = listar_packages_stone(device_sel)
-
-        if st.session_state.adb_packages:
-            st.sidebar.success(f"✅ {len(st.session_state.adb_packages)} packages prontos")
-            adb_ativo = True
-        else:
-            st.sidebar.caption("Clique em 'Buscar apps Stone/Ton' para detectar.")
-            adb_ativo = False
-
-    if st.session_state.tc_capturando:
-        arq = Path(st.session_state.get("log_arquivo_atual", ""))
-        kb = arq.stat().st_size / 1024 if arq.exists() else 0
-        st.sidebar.info(f"🔴 Capturando **{st.session_state.tc_capturando}** — {kb:.1f} KB")
-        if st.sidebar.button("⏹️ Parar Captura", use_container_width=True):
-            parar_captura()
-            st.rerun()
-
-    st.sidebar.markdown("### 📁 Logs Salvos")
-    arquivos_log = sorted(LOG_DIR.glob("*.txt"), reverse=True)
-    if not arquivos_log:
-        st.sidebar.caption("Nenhum log capturado ainda.")
-    else:
-        for arq in arquivos_log:
-            kb = arq.stat().st_size / 1024
-            st.sidebar.markdown(f"📄 `{arq.name[:28]}` {kb:.1f}KB")
-            c1, c2 = st.sidebar.columns(2)
-            with c1:
-                with open(arq, "rb") as f:
-                    st.sidebar.download_button("⬇️ Baixar", data=f.read(),
-                        file_name=arq.name, mime="text/plain", key=f"dl_{arq.name}")
-            with c2:
-                if st.sidebar.button("🗑️ Excluir", key=f"del_{arq.name}"):
-                    arq.unlink(); st.rerun()
-
-    st.sidebar.markdown("---")
     st.sidebar.markdown("## 📈 Resumo Executivo")
-    for _bg, _borda, _titulo, _val, _ct in [
-        ("#f0f4f8","#1a365d","Total de Casos", total_itens, "#0f172a"),
-        ("#e6fffa","#319795","Aprovado ✅", qtd_aprovado, "#042f2e"),
-        ("#fff5f5","#e53e3e","Reprovado ❌", qtd_reprovado, "#451a1a"),
-        ("#fffaf0","#dd6b20","Não Aplicável ⚠️", qtd_nao_aplic, "#431407"),
-        ("#edf2f7","#4a5568","Não Executados", qtd_nao_exec, "#1e293b"),
-    ]:
-        st.sidebar.markdown(f"""
-            <div style="padding:10px;border-radius:6px;background-color:{_bg};border-left:5px solid {_borda};margin-bottom:10px;">
-                <span style="font-size:13px;color:{_borda};font-weight:bold;">{_titulo}</span><br>
-                <span style="font-size:20px;font-weight:bold;color:{_ct};">{_val}</span>
-            </div>
-        """, unsafe_allow_html=True)
+
+    st.sidebar.markdown(f"""
+        <div style="padding: 10px; border-radius: 6px; background-color: #f0f4f8; border-left: 5px solid #1a365d; margin-bottom: 10px;">
+            <span style="font-size: 13px; color: #1a365d; font-weight: bold;">Total de Casos</span><br>
+            <span style="font-size: 20px; font-weight: bold; color: #0f172a;">{total_itens}</span>
+        </div>
+    """, unsafe_allow_html=True)
+
+    st.sidebar.markdown(f"""
+        <div style="padding: 10px; border-radius: 6px; background-color: #e6fffa; border-left: 5px solid #319795; margin-bottom: 10px;">
+            <span style="font-size: 13px; color: #234e52; font-weight: bold;">Aprovado ✅</span><br>
+            <span style="font-size: 20px; font-weight: bold; color: #042f2e;">{qtd_aprovado}</span>
+        </div>
+    """, unsafe_allow_html=True)
+
+    st.sidebar.markdown(f"""
+        <div style="padding: 10px; border-radius: 6px; background-color: #fff5f5; border-left: 5px solid #e53e3e; margin-bottom: 10px;">
+            <span style="font-size: 13px; color: #742a2a; font-weight: bold;">Reprovado ❌</span><br>
+            <span style="font-size: 20px; font-weight: bold; color: #451a1a;">{qtd_reprovado}</span>
+        </div>
+    """, unsafe_allow_html=True)
+
+    st.sidebar.markdown(f"""
+        <div style="padding: 10px; border-radius: 6px; background-color: #fffaf0; border-left: 5px solid #dd6b20; margin-bottom: 10px;">
+            <span style="font-size: 13px; color: #7b341e; font-weight: bold;">Não Aplicável ⚠️</span><br>
+            <span style="font-size: 20px; font-weight: bold; color: #431407;">{qtd_nao_aplic}</span>
+        </div>
+    """, unsafe_allow_html=True)
+
+    st.sidebar.markdown(f"""
+        <div style="padding: 10px; border-radius: 6px; background-color: #edf2f7; border-left: 5px solid #4a5568; margin-bottom: 20px;">
+            <span style="font-size: 13px; color: #2d3748; font-weight: bold;">Não Executados</span><br>
+            <span style="font-size: 20px; font-weight: bold; color: #1e293b;">{qtd_nao_exec}</span>
+        </div>
+    """, unsafe_allow_html=True)
 
     st.sidebar.markdown("### 📄 Exportar")
     try:
@@ -638,37 +510,14 @@ def main():
 
             st.write(f"**Passos para Execução:**\n{row['Descrição / Passos']}")
 
-            col_sel, col_adb = st.columns([4, 1])
-            with col_sel:
-                st.selectbox(
-                    f"Alterar status de {id_teste}:",
-                    OPCOES_STATUS,
-                    index=OPCOES_STATUS.index(status_atual) if status_atual in OPCOES_STATUS else 0,
-                    key=f"status_{id_teste}",
-                    on_change=atualizar_status,
-                    args=(id_teste,)
-                )
-            with col_adb:
-                if adb_ativo:
-                    tc_cap = st.session_state.tc_capturando
-                    if tc_cap == id_teste:
-                        arq = Path(st.session_state.get("log_arquivo_atual",""))
-                        kb = arq.stat().st_size/1024 if arq.exists() else 0
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        if st.button(f"⏹️ {kb:.0f}KB", key=f"adb_{id_teste}", use_container_width=True):
-                            parar_captura(); st.rerun()
-                    elif tc_cap is None:
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        if st.button("▶️ Log", key=f"adb_{id_teste}", use_container_width=True):
-                            ok = iniciar_captura_tc(id_teste,
-                                                    st.session_state.adb_device,
-                                                    st.session_state.adb_packages)
-                            if not ok:
-                                st.warning("Nenhum processo stone ativo. Abra o app no POS.")
-                            st.rerun()
-                    else:
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        st.button("▶️ Log", key=f"adb_{id_teste}", disabled=True, use_container_width=True)
+            st.selectbox(
+                f"Alterar status de {id_teste}:",
+                OPCOES_STATUS,
+                index=OPCOES_STATUS.index(status_atual) if status_atual in OPCOES_STATUS else 0,
+                key=f"status_{id_teste}",
+                on_change=atualizar_status,
+                args=(id_teste,)
+            )
 
             if status_atual in STATUS_COM_OBSERVACAO:
                 label_obs = "📝 Descrição do defeito / motivo:" if status_atual == "Reprovado ❌" else "📝 Motivo de não aplicabilidade:"
