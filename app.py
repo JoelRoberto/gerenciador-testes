@@ -117,26 +117,33 @@ def get_pids_stone(device_id, packages):
                     except: pass
     return pids
 
-def _capturar_thread(device_id, packages, tc, nome_arquivo, pids):
+def _capturar_thread(device_id, packages, tc, nome_arquivo):
     sentinela = LOG_DIR/".parar"
     if sentinela.exists(): sentinela.unlink()
+    # Pega PIDs na hora de iniciar (melhor esforco)
+    pids = get_pids_stone(device_id, packages)
     pid_set = set(pids.values())
     try:
         proc = subprocess.Popen(
-            ["adb","-s",device_id,"logcat","-v","threadtime"],
+            [_adb_bin(),"-s",device_id,"logcat","-v","threadtime"],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace")
         st.session_state._adb_proc = proc
         with open(nome_arquivo,"w",encoding="utf-8") as f:
             f.write("=== LOG CAPTURADO ===\n")
             f.write(f"TC: {tc}\nDevice: {device_id}\n")
-            for pkg,pid in pids.items(): f.write(f"  {pkg} (PID {pid})\n")
+            if pids:
+                for pkg,pid in pids.items(): f.write(f"  {pkg} (PID {pid})\n")
+            else:
+                f.write("  PIDs nao encontrados - filtrando por package name\n")
             f.write(f"Inicio: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n")
             f.write("="*50+"\n\n")
             for linha in proc.stdout:
                 if sentinela.exists(): break
                 partes = linha.split()
-                if (len(partes)>=3 and partes[2] in pid_set) or any(pkg in linha for pkg in packages):
+                pid_match = pid_set and len(partes)>=3 and partes[2] in pid_set
+                pkg_match = any(pkg in linha for pkg in packages)
+                if pid_match or pkg_match:
                     f.write(linha); f.flush()
     except Exception as e:
         with open(nome_arquivo,"a",encoding="utf-8") as f:
@@ -145,12 +152,10 @@ def _capturar_thread(device_id, packages, tc, nome_arquivo, pids):
 def iniciar_captura_tc(tc, device_id, packages):
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     nome_arquivo = LOG_DIR/f"{tc}_stone_{timestamp}.txt"
-    pids = get_pids_stone(device_id, packages)
-    if not pids: return False
     st.session_state.tc_capturando = tc
     st.session_state.log_arquivo_atual = str(nome_arquivo)
     threading.Thread(target=_capturar_thread,
-                     args=(device_id,packages,tc,nome_arquivo,pids),
+                     args=(device_id,packages,tc,nome_arquivo),
                      daemon=True).start()
     return True
 
