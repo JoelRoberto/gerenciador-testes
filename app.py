@@ -303,50 +303,29 @@ def gerar_pdf_fpdf(df_base, resultados, observacoes, config, detalhes_reprovado=
         pdf.set_xy(x+wid+wc+2,y+3); pdf.multi_cell(wp-4,h,pl)
         pdf.set_font("Helvetica","B",9); pdf.set_xy(x+wid+wc+wp,y+(alp/2)-2); pdf.cell(ws,4,sl,align="C")
         yo=y+alp
-        if ob:
-            if "Reprovado" in so: pdf.set_fill_color(255,235,235); pdf.set_text_color(116,42,42)
-            else: pdf.set_fill_color(255,244,225); pdf.set_text_color(123,52,30)
-            pdf.rect(x,yo,lt,ao,style="F"); pdf.rect(x,yo,lt,ao)
-            pdf.set_font("Helvetica","B",8); pdf.set_xy(x+3,yo+2); pdf.write(h,ol)
-            pdf.set_font("Helvetica","",8); pdf.set_xy(x+3+pdf.get_string_width(ol)+4,yo+2)
-            pdf.multi_cell(lt-6-pdf.get_string_width(ol)-4,h,ob)
-        yo2 = yo+ao
+        yo2=yo
         if "Reprovado" in so:
             obj = tratar_texto_pdf(str(row.get("Objetivo","")).strip())
             ra  = tratar_texto_pdf(str(row.get("ResultadoApresentado","")).strip())
             re_ = tratar_texto_pdf(str(row.get("ResultadoEsperado","")).strip())
             if obj or ra or re_:
+                lbl_obj="Objetivo: "; lbl_ra="Resultado Apresentado: "; lbl_re="Resultado Esperado: "
+                lobj = len(pdf.multi_cell(lt-6-pdf.get_string_width(lbl_obj)-4,h,obj,split_only=True)) if obj else 0
+                lra  = len(pdf.multi_cell(lt-6-pdf.get_string_width(lbl_ra)-4, h,ra, split_only=True)) if ra  else 0
+                lre  = len(pdf.multi_cell(lt-6-pdf.get_string_width(lbl_re)-4, h,re_,split_only=True)) if re_ else 0
+                pad=4
+                hbox = ((max(lobj,1)*h+pad) if obj else 0) + ((max(lra,1)*h+pad) if ra else 0) + ((max(lre,1)*h+pad) if re_ else 0) + 4
+                if pdf.get_y()+hbox > 275: pdf.add_page(); yo2=pdf.get_y()
                 pdf.set_fill_color(255,220,220); pdf.set_text_color(116,42,42)
-                # Objetivo (full width)
-                if obj:
-                    lobj = len(pdf.multi_cell(lt-6,h,obj,split_only=True))
-                    hobj = lobj*h+8
-                    if pdf.get_y()+hobj > 275: pdf.add_page(); yo2=pdf.get_y()
-                    pdf.rect(x,yo2,lt,hobj,style="F"); pdf.rect(x,yo2,lt,hobj)
-                    lbl_obj = "Objetivo: "
-                    pdf.set_font("Helvetica","B",8); pdf.set_xy(x+3,yo2+2); pdf.write(h,lbl_obj)
-                    pdf.set_font("Helvetica","",8); pdf.set_xy(x+3+pdf.get_string_width(lbl_obj)+4,yo2+2)
-                    pdf.multi_cell(lt-6-pdf.get_string_width(lbl_obj)-4,h,obj)
-                    yo2 += hobj
-                # Resultado Apresentado | Resultado Esperado (side by side)
-                if ra or re_:
-                    hw = (lt-1)//2
-                    lra = len(pdf.multi_cell(hw-6,h,ra,split_only=True)) if ra else 1
-                    lre = len(pdf.multi_cell(hw-6,h,re_,split_only=True)) if re_ else 1
-                    hrow2 = max(lra,lre)*h+8
-                    if pdf.get_y()+hrow2 > 275: pdf.add_page(); yo2=pdf.get_y()
-                    pdf.rect(x,yo2,hw,hrow2,style="F"); pdf.rect(x,yo2,hw,hrow2)
-                    pdf.rect(x+hw+1,yo2,hw,hrow2,style="F"); pdf.rect(x+hw+1,yo2,hw,hrow2)
-                    lbl_ra = "Resultado Apresentado: "; lbl_re = "Resultado Esperado: "
-                    # left cell
-                    pdf.set_font("Helvetica","B",8); pdf.set_xy(x+3,yo2+2); pdf.write(h,lbl_ra)
-                    pdf.set_font("Helvetica","",8); pdf.set_xy(x+3+pdf.get_string_width(lbl_ra)+4,yo2+2)
-                    if ra: pdf.multi_cell(hw-6-pdf.get_string_width(lbl_ra)-4,h,ra)
-                    # right cell
-                    pdf.set_font("Helvetica","B",8); pdf.set_xy(x+hw+4,yo2+2); pdf.write(h,lbl_re)
-                    pdf.set_font("Helvetica","",8); pdf.set_xy(x+hw+4+pdf.get_string_width(lbl_re)+4,yo2+2)
-                    if re_: pdf.multi_cell(hw-6-pdf.get_string_width(lbl_re)-4,h,re_)
-                    yo2 += hrow2
+                pdf.rect(x,yo2,lt,hbox,style="F"); pdf.rect(x,yo2,lt,hbox)
+                cur_y = yo2+2
+                for lbl,val in [(lbl_obj,obj),(lbl_ra,ra),(lbl_re,re_)]:
+                    if val:
+                        pdf.set_font("Helvetica","B",8); pdf.set_xy(x+3,cur_y); pdf.write(h,lbl)
+                        pdf.set_font("Helvetica","",8); pdf.set_xy(x+3+pdf.get_string_width(lbl)+4,cur_y)
+                        pdf.multi_cell(lt-6-pdf.get_string_width(lbl)-4,h,val)
+                        cur_y += len(pdf.multi_cell(lt-6-pdf.get_string_width(lbl)-4,h,val,split_only=True))*h+pad
+                yo2 += hbox
         pdf.set_xy(10,yo2)
     return bytes(pdf.output())
 
@@ -638,27 +617,23 @@ def main():
                         st.markdown("<br>",unsafe_allow_html=True)
                         st.button("▶️ Log",key=f"adb_{id_teste}",disabled=True,use_container_width=True)
 
-            if status_atual in STATUS_COM_OBSERVACAO:
-                lbl="📝 Descrição do defeito:" if status_atual=="Reprovado ❌" else "📝 Motivo de não aplicabilidade:"
-                st.text_area(lbl,value=obs_atual,key=f"obs_{id_teste}",height=80,
-                    placeholder="Descreva o defeito ou motivo...",
+            if status_atual == "Não Aplicável ⚠️":
+                st.text_area("📝 Motivo de não aplicabilidade:",value=obs_atual,key=f"obs_{id_teste}",height=80,
+                    placeholder="Descreva o motivo...",
                     on_change=atualizar_observacao,args=(id_teste,))
-                if status_atual=="Reprovado ❌":
-                    if "detalhes_reprovado" not in st.session_state:
-                        st.session_state.detalhes_reprovado = {}
-                    det = st.session_state.detalhes_reprovado.get(id_teste,{"objetivo":"","resultado_apresentado":"","resultado_esperado":""})
-                    st.text_area("🎯 Objetivo do teste:",value=det.get("objetivo",""),key=f"det_objetivo_{id_teste}",height=60,
-                        placeholder="Descreva o objetivo do caso de teste...",
-                        on_change=atualizar_detalhe_reprovado,args=(id_teste,"objetivo"))
-                    ca,cb2 = st.columns(2)
-                    with ca:
-                        st.text_area("❌ Resultado Apresentado:",value=det.get("resultado_apresentado",""),key=f"det_resultado_apresentado_{id_teste}",height=80,
-                            placeholder="O que aconteceu de fato...",
-                            on_change=atualizar_detalhe_reprovado,args=(id_teste,"resultado_apresentado"))
-                    with cb2:
-                        st.text_area("✅ Resultado Esperado:",value=det.get("resultado_esperado",""),key=f"det_resultado_esperado_{id_teste}",height=80,
-                            placeholder="O que deveria acontecer...",
-                            on_change=atualizar_detalhe_reprovado,args=(id_teste,"resultado_esperado"))
+            elif status_atual == "Reprovado ❌":
+                if "detalhes_reprovado" not in st.session_state:
+                    st.session_state.detalhes_reprovado = {}
+                det = st.session_state.detalhes_reprovado.get(id_teste,{"objetivo":"","resultado_apresentado":"","resultado_esperado":""})
+                st.text_area("🎯 Objetivo:",value=det.get("objetivo",""),key=f"det_objetivo_{id_teste}",height=60,
+                    placeholder="Descreva o objetivo do caso de teste...",
+                    on_change=atualizar_detalhe_reprovado,args=(id_teste,"objetivo"))
+                st.text_area("❌ Resultado Apresentado:",value=det.get("resultado_apresentado",""),key=f"det_resultado_apresentado_{id_teste}",height=80,
+                    placeholder="O que aconteceu de fato...",
+                    on_change=atualizar_detalhe_reprovado,args=(id_teste,"resultado_apresentado"))
+                st.text_area("✅ Resultado Esperado:",value=det.get("resultado_esperado",""),key=f"det_resultado_esperado_{id_teste}",height=80,
+                    placeholder="O que deveria acontecer...",
+                    on_change=atualizar_detalhe_reprovado,args=(id_teste,"resultado_esperado"))
             st.markdown("---")
 
 
