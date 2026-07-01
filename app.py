@@ -52,21 +52,43 @@ SAVES_DIR.mkdir(exist_ok=True)
 LOG_DIR.mkdir(exist_ok=True)
 
 
+def _is_streamlit_cloud():
+    import os
+    return (
+        os.environ.get("STREAMLIT_SHARING_MODE") == "streamlit"
+        or os.path.exists("/mount/src")
+        or os.environ.get("HOME","") == "/home/appuser"
+    )
+
 def _encontrar_adb():
-    import shutil
+    import shutil, os, glob
+    if _is_streamlit_cloud():
+        return None
     found = shutil.which("adb")
     if found:
         return found
-    import os
+    user = os.environ.get("USERNAME", os.environ.get("USER",""))
     candidatos = [
         r"C:\Variaveis_de_ambiente\scrcpy-win64-v2.7\adb.exe",
-        r"C:\Users\{}\AppData\Local\Android\Sdk\platform-tools\adb.exe".format(os.environ.get("USERNAME","")),
+        r"C:\Variaveis_de_ambiente\scrcpy-win64-v3.3.4\adb.exe",
+        rf"C:\Users\{user}\Downloads\scrcpy-3-3-4\scrcpy-win64-v3.3.4\adb.exe",
+        rf"C:\Users\{user}\AppData\Local\Android\Sdk\platform-tools\adb.exe",
         r"C:\Android\platform-tools\adb.exe",
         r"C:\platform-tools\adb.exe",
     ]
     for c in candidatos:
-        if Path(c).exists():
+        if c and Path(c).exists():
             return c
+    padroes = [
+        r"C:\Variaveis_de_ambiente\*\adb.exe",
+        rf"C:\Users\{user}\Downloads\*\adb.exe",
+        rf"C:\Users\{user}\Desktop\*\adb.exe",
+        r"C:\scrcpy*\adb.exe",
+    ]
+    for pat in padroes:
+        achados = glob.glob(pat)
+        if achados:
+            return achados[0]
     return None
 
 ADB = _encontrar_adb()
@@ -460,9 +482,12 @@ def main():
     st.sidebar.markdown("### 📱 Captura de Log (ADB)")
     if st.sidebar.button("🔄 Detectar Dispositivo",use_container_width=True): st.rerun()
     if not ADB:
-        st.sidebar.error("ADB não encontrado nesta máquina.")
-        with st.sidebar.expander("📖 Como instalar o ADB"):
-            st.markdown("""
+        if _is_streamlit_cloud():
+            st.sidebar.info("⚠️ Captura de Log disponível apenas na versão local (desktop). Na versão web o ADB não tem acesso ao dispositivo USB.")
+        else:
+            st.sidebar.error("ADB não encontrado nesta máquina.")
+            with st.sidebar.expander("📖 Como instalar o ADB"):
+                st.markdown("""
 **Opção rápida (recomendada): scrcpy**
 1. Baixe em [github.com/Genymobile/scrcpy/releases](https://github.com/Genymobile/scrcpy/releases)
 2. Baixe o arquivo `scrcpy-win64-vX.X.zip`
