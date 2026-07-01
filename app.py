@@ -481,31 +481,49 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 📱 Captura de Log (ADB)")
     if st.sidebar.button("🔄 Detectar Dispositivo",use_container_width=True): st.rerun()
+    # Caminho manual do ADB (salvo em arquivo local .adb_path)
+    import os as _os
+    _adb_path_file = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".adb_path")
+    def _salvar_adb_manual(caminho):
+        with open(_adb_path_file, "w") as _f: _f.write(caminho.strip())
+    def _carregar_adb_manual():
+        if _os.path.exists(_adb_path_file):
+            with open(_adb_path_file) as _f: return _f.read().strip()
+        return ""
+
+    global ADB
+    if not ADB:
+        _adb_manual = _carregar_adb_manual()
+        if _adb_manual and Path(_adb_manual).exists():
+            ADB = _adb_manual
+    adb_efetivo = ADB
+
     if not ADB:
         if _is_streamlit_cloud():
             st.sidebar.info("⚠️ Captura de Log disponível apenas na versão local (desktop). Na versão web o ADB não tem acesso ao dispositivo USB.")
         else:
-            st.sidebar.error("ADB não encontrado nesta máquina.")
+            st.sidebar.error("ADB não encontrado automaticamente.")
+            with st.sidebar.expander("📁 Informar caminho do ADB manualmente", expanded=True):
+                _caminho_input = st.text_input(
+                    "Cole o caminho completo do adb.exe:",
+                    value=_carregar_adb_manual(),
+                    placeholder=r"Ex: C:\scrcpy db.exe",
+                    key="adb_caminho_manual"
+                )
+                if st.button("💾 Salvar e Detectar", key="salvar_adb_manual", use_container_width=True):
+                    if _caminho_input and Path(_caminho_input).exists():
+                        _salvar_adb_manual(_caminho_input)
+                        st.success("Caminho salvo! Recarregando...")
+                        st.rerun()
+                    else:
+                        st.error("Caminho inválido ou arquivo não encontrado.")
             with st.sidebar.expander("📖 Como instalar o ADB"):
                 st.markdown("""
 **Opção rápida (recomendada): scrcpy**
 1. Baixe em [github.com/Genymobile/scrcpy/releases](https://github.com/Genymobile/scrcpy/releases)
-2. Baixe o arquivo `scrcpy-win64-vX.X.zip`
-3. Extraia em uma pasta, ex: `C:\\scrcpy`
-4. O arquivo `adb.exe` já vem dentro da pasta
-
-**Adicionar ao PATH (Windows):**
-1. Pesquise "Variáveis de Ambiente" no menu Iniciar
-2. Clique em "Variáveis de Ambiente"
-3. Em "Variáveis do sistema", selecione `Path` → Editar
-4. Clique "Novo" e cole o caminho da pasta do scrcpy (ex: `C:\\scrcpy`)
-5. OK em tudo e **feche e abra um novo terminal**
-6. Rode `streamlit run app.py` novamente
-
-**Alternativa: Android SDK Platform Tools**
-- Baixe em [developer.android.com/tools/releases/platform-tools](https://developer.android.com/tools/releases/platform-tools)
-- Mesmo processo de adicionar ao PATH
-            """)
+2. Extraia em qualquer pasta (ex: `C:\\scrcpy`)
+3. Cole o caminho do `adb.exe` no campo acima
+                """)
         adb_ativo = False
     else:
         dispositivos = listar_dispositivos()
