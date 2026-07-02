@@ -563,6 +563,7 @@ def main():
             else:
                 st.sidebar.error("ADB não encontrado. Instale o Android SDK Platform Tools.")
         adb_ativo = False
+    else:
         dispositivos = listar_dispositivos()
         if not dispositivos:
             st.sidebar.warning("Nenhum dispositivo USB encontrado.")
