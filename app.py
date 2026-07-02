@@ -181,9 +181,26 @@ def rodar_adb(args, timeout=10):
     except subprocess.TimeoutExpired:
         return "","Timeout"
 
-def listar_dispositivos():
+def listar_dispositivos_raw():
+    """Retorna as linhas cruas de 'adb devices' (sem o cabeçalho), para diagnóstico."""
     stdout,_ = rodar_adb(["devices"])
-    return [l.split("\t")[0].strip() for l in stdout.splitlines()[1:] if "\tdevice" in l]
+    return stdout.splitlines()[1:]
+
+def listar_dispositivos():
+    import time
+    linhas = [l for l in listar_dispositivos_raw() if l.strip()]
+    prontos = [l.split("\t")[0].strip() for l in linhas if "\tdevice" in l]
+    # Logo após (re)iniciar o servidor ADB, a enumeração USB pode não ter
+    # terminado ainda e a 1a chamada volta vazia mesmo com o aparelho plugado.
+    if not prontos and not linhas:
+        time.sleep(1.5)
+        linhas = [l for l in listar_dispositivos_raw() if l.strip()]
+        prontos = [l.split("\t")[0].strip() for l in linhas if "\tdevice" in l]
+    return prontos
+
+def reiniciar_servidor_adb():
+    rodar_adb(["kill-server"])
+    rodar_adb(["start-server"])
 
 def listar_packages_stone(device_id):
     stdout,_ = rodar_adb(["-s",device_id,"shell","pm","list","packages"])
@@ -566,16 +583,29 @@ def main():
     else:
         dispositivos = listar_dispositivos()
         if not dispositivos:
-            st.sidebar.warning("Nenhum dispositivo USB encontrado.")
+            raw = listar_dispositivos_raw()
+            if any("unauthorized" in l for l in raw):
+                st.sidebar.warning("POS conectado, mas **não autorizado**. Olhe a tela do aparelho e toque em **Permitir**.")
+            elif any("offline" in l or "no permissions" in l for l in raw):
+                st.sidebar.warning("POS detectado, mas em estado **offline/sem permissão**. Tente outro cabo/porta USB ou reinicie o servidor ADB abaixo.")
+            else:
+                st.sidebar.warning("Nenhum dispositivo USB encontrado.")
+
+            if st.sidebar.button("🔁 Reiniciar servidor ADB", use_container_width=True):
+                with st.spinner("Reiniciando..."):
+                    reiniciar_servidor_adb()
+                st.rerun()
+
             with st.sidebar.expander("📖 Como conectar o POS"):
                 st.markdown("""
-1. Conecte o POS ao computador via **cabo USB**
+1. Conecte o POS ao computador via **cabo USB** (alguns cabos são só de carga — troque se possível)
 2. No POS, ative a **Depuração USB**:
    - Configurações → Sobre o dispositivo → toque 7x em "Número da versão" para ativar o modo desenvolvedor
    - Configurações → Opções do desenvolvedor → ative "Depuração USB"
 3. Uma caixa de diálogo deve aparecer no POS pedindo autorização — toque em **"Permitir"**
 4. Clique em **🔄 Detectar Dispositivo** acima
-5. Se ainda não aparecer, tente outro cabo USB (alguns cabos são só de carga)
+5. Se o Windows não reconhecer o aparelho (não aparece nem como "unauthorized"), confira no **Gerenciador de Dispositivos** se ele aparece com um ícone de alerta — isso indica **driver USB ausente**; instale o driver do fabricante do POS ou o [Google USB Driver](https://developer.android.com/studio/run/win-usb)
+6. Se o app já foi usado com outra ferramenta ADB (ex: scrcpy) nesta máquina, use **🔁 Reiniciar servidor ADB** acima — instalações diferentes de ADB podem deixar o servidor antigo travado
                 """)
             adb_ativo = False
         else:
