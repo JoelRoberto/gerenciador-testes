@@ -93,6 +93,39 @@ def _encontrar_adb():
 
 ADB = _encontrar_adb()
 
+def _baixar_adb_automatico(status_callback=None):
+    """Baixa platform-tools do Google, extrai e retorna path do adb.exe."""
+    import sys, urllib.request, zipfile, os
+    if sys.platform != "win32":
+        return None, "Download automático disponível apenas no Windows."
+    url = "https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
+    dest_dir = Path.home() / "AppData" / "Local" / "gerenciador-testes" / "platform-tools"
+    adb_path = dest_dir / "adb.exe"
+    # Já existe
+    if adb_path.exists():
+        return str(adb_path), None
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = dest_dir.parent / "platform-tools.zip"
+        if status_callback: status_callback("⬇️ Baixando ADB (platform-tools)...")
+        urllib.request.urlretrieve(url, zip_path)
+        if status_callback: status_callback("📦 Extraindo arquivos...")
+        with zipfile.ZipFile(zip_path, "r") as z:
+            for member in z.namelist():
+                filename = Path(member).name
+                if not filename:
+                    continue
+                source = z.open(member)
+                target_path = dest_dir / filename
+                with open(target_path, "wb") as t:
+                    t.write(source.read())
+        zip_path.unlink(missing_ok=True)
+        if adb_path.exists():
+            return str(adb_path), None
+        return None, "Extração concluída mas adb.exe não encontrado."
+    except Exception as e:
+        return None, f"Erro no download: {e}"
+
 
 # PERSISTÊNCIA
 def _arquivo_save():
@@ -326,6 +359,18 @@ def gerar_pdf_fpdf(df_base, resultados, observacoes, config, detalhes_reprovado=
         pdf.set_font("Helvetica","B",9); pdf.set_xy(x+wid+wc+wp,y+(alp/2)-2); pdf.cell(ws,4,sl,align="C")
         yo=y+alp
         yo2=yo
+        # Motivo de não aplicabilidade
+        if "Não Aplicável" in so and ob:
+            lbl_na = "Motivo de nao aplicabilidade: "
+            lna = len(pdf.multi_cell(lt-6-pdf.get_string_width(lbl_na)-4,h,ob,split_only=True))
+            hna = lna*h+8
+            if pdf.get_y()+hna > 275: pdf.add_page(); yo2=pdf.get_y()
+            pdf.set_fill_color(255,244,225); pdf.set_text_color(123,52,30)
+            pdf.rect(x,yo2,lt,hna,style="F"); pdf.rect(x,yo2,lt,hna)
+            pdf.set_font("Helvetica","B",8); pdf.set_xy(x+3,yo2+2); pdf.write(h,lbl_na)
+            pdf.set_font("Helvetica","",8); pdf.set_xy(x+3+pdf.get_string_width(lbl_na)+4,yo2+2)
+            pdf.multi_cell(lt-6-pdf.get_string_width(lbl_na)-4,h,ob)
+            yo2 += hna
         if "Reprovado" in so:
             obj = tratar_texto_pdf(str(row.get("Objetivo","")).strip())
             ra  = tratar_texto_pdf(str(row.get("ResultadoApresentado","")).strip())
@@ -502,30 +547,22 @@ def main():
         if _is_streamlit_cloud():
             st.sidebar.info("⚠️ Captura de Log disponível apenas na versão local (desktop). Na versão web o ADB não tem acesso ao dispositivo USB.")
         else:
-            st.sidebar.error("ADB não encontrado automaticamente.")
-            with st.sidebar.expander("📁 Informar caminho do ADB manualmente", expanded=True):
-                _caminho_input = st.text_input(
-                    "Cole o caminho completo do adb.exe:",
-                    value=_carregar_adb_manual(),
-                    placeholder=r"Ex: C:\scrcpy db.exe",
-                    key="adb_caminho_manual"
-                )
-                if st.button("💾 Salvar e Detectar", key="salvar_adb_manual", use_container_width=True):
-                    if _caminho_input and Path(_caminho_input).exists():
-                        _salvar_adb_manual(_caminho_input)
-                        st.success("Caminho salvo! Recarregando...")
-                        st.rerun()
-                    else:
-                        st.error("Caminho inválido ou arquivo não encontrado.")
-            with st.sidebar.expander("📖 Como instalar o ADB"):
-                st.markdown("""
-**Opção rápida (recomendada): scrcpy**
-1. Baixe em [github.com/Genymobile/scrcpy/releases](https://github.com/Genymobile/scrcpy/releases)
-2. Extraia em qualquer pasta (ex: `C:\\scrcpy`)
-3. Cole o caminho do `adb.exe` no campo acima
-                """)
+            import sys as _sys
+            if _sys.platform == "win32":
+                _ph = st.sidebar.empty()
+                _ph.info("🔄 ADB não encontrado. Instalando automaticamente...")
+                def _cb(msg): _ph.info(msg)
+                _adb_novo, _err = _baixar_adb_automatico(status_callback=_cb)
+                if _adb_novo:
+                    _salvar_adb_manual(_adb_novo)
+                    ADB = _adb_novo
+                    _ph.success("✅ ADB instalado! Detectando dispositivo...")
+                    st.rerun()
+                else:
+                    _ph.error(f"❌ Falha na instalação automática: {_err}")
+            else:
+                st.sidebar.error("ADB não encontrado. Instale o Android SDK Platform Tools.")
         adb_ativo = False
-    else:
         dispositivos = listar_dispositivos()
         if not dispositivos:
             st.sidebar.warning("Nenhum dispositivo USB encontrado.")
